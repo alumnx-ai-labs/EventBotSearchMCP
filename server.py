@@ -14,6 +14,8 @@ Transport  : Streamable HTTP  →  connect claude.ai to  http://<host>:<port>/mc
 
 import os
 from mcp.server.fastmcp import FastMCP
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 import httpx
 
 BASE_URL = "http://13.126.130.56:8003"
@@ -32,6 +34,11 @@ mcp = FastMCP(
 mcp.settings.host = "0.0.0.0"
 mcp.settings.port = int(os.environ.get("PORT", 8000))
 mcp.settings.transport_security.enable_dns_rebinding_protection = False
+
+
+@mcp.custom_route("/health", methods=["GET"])
+async def health(_request: Request) -> JSONResponse:
+    return JSONResponse({"status": "ok"})
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
