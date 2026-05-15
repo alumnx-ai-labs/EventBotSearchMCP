@@ -10,6 +10,7 @@ Backend API: http://13.126.130.56:8003
 Transport  : Streamable HTTP  →  connect claude.ai to  http://<host>:8000/mcp
 """
 
+import os
 from mcp.server.fastmcp import FastMCP
 import httpx
 
@@ -24,9 +25,9 @@ mcp = FastMCP(
     ),
 )
 
-# Bind to all interfaces so the server is reachable externally
+# Render injects PORT; fall back to 8000 for local dev
 mcp.settings.host = "0.0.0.0"
-mcp.settings.port = 8000
+mcp.settings.port = int(os.environ.get("PORT", 8000))
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
