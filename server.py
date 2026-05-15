@@ -1,13 +1,13 @@
 """
 EventBot MCP Server
 -------------------
-Exposes two tools to Claude (or any MCP client):
+Single tool: search_attendees(question, limit)
 
-  list_all_attendees()          – returns every registered attendee
-  get_attendee_details(query)   – semantic search for a specific person / role / org
+Accepts any natural-language question about event attendees and returns
+matching profiles from the AlumnxAI Labs EventBot database.
 
 Backend API: http://13.126.130.56:8003
-Transport  : Streamable HTTP  →  connect claude.ai to  http://<host>:8000/mcp
+Transport  : Streamable HTTP  →  connect claude.ai to  http://<host>:<port>/mcp
 """
 
 import os
@@ -20,19 +20,17 @@ mcp = FastMCP(
     name="EventBot Attendees",
     instructions=(
         "You have access to the AlumnxAI Labs event attendee database. "
-        "Use list_all_attendees to show everyone, and get_attendee_details "
-        "to look up a specific person by name, role, or organisation."
+        "Use search_attendees to answer any question about registered candidates — "
+        "who they are, what they do, which organisation they belong to, and more. "
+        "Pass the user's question (or the key part of it) directly as the query."
     ),
 )
 
-# Render injects PORT; fall back to 8000 for local dev
 mcp.settings.host = "0.0.0.0"
 mcp.settings.port = int(os.environ.get("PORT", 8000))
 
 
-# ── helpers ──────────────────────────────────────────────────────────────────
-
-def _format_attendee(a: dict, show_score: bool = False) -> str:
+def _format_attendee(a: dict) -> str:
     lines = [
         f"Name        : {a['full_name']}",
         f"Role        : {a['role']}",
@@ -44,36 +42,48 @@ def _format_attendee(a: dict, show_score: bool = False) -> str:
         lines.append(f"Profile     : {a['detailed_profile']}")
     if a.get("linkedin_url"):
         lines.append(f"LinkedIn/URL: {a['linkedin_url']}")
-    if show_score:
-        lines.append(f"Match Score : {a['score']:.2f}")
     return "\n".join(lines)
 
 
-# ── tools ─────────────────────────────────────────────────────────────────────
-
 @mcp.tool()
-async def list_all_attendees() -> str:
+async def search_attendees(question: str, limit: int = 50) -> str:
     """
-    Return the full list of every registered event attendee.
+    Answer any question about registered event attendees.
 
-    Includes name, role, organisation, experience level, bio, and
-    LinkedIn/website URL for each person.
+    Pass the user's question as-is. The backend uses semantic search with
+    LLM query expansion, so it understands natural language — ask about
+    names, roles, industries, locations, skills, organisations, or anything else.
+
+    To get ALL attendees, pass question="list all attendees" and limit=50.
+
+    Args:
+        question : Any natural-language question or keyword about candidates.
+        limit    : Maximum number of results (1–50, default 50).
     """
+    limit = max(1, min(limit, 50))
+
     async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.get(
             f"{BASE_URL}/search",
-            params={"q": "business professional event attendee", "limit": 50},
+            params={"q": question, "limit": limit},
         )
         resp.raise_for_status()
 
     data = resp.json()
     attendees = data.get("results", [])
-    total = data.get("total", len(attendees))
 
     if not attendees:
-        return "No attendees found in the database."
+        return f"No attendees found for: '{question}'"
 
-    blocks = [f"Registered attendees: {total}\n{'=' * 50}"]
+    expanded = data.get("expanded_query") or question
+    header = (
+        f"Query   : {question}\n"
+        f"Expanded: {expanded}\n"
+        f"Results : {len(attendees)}\n"
+        f"{'=' * 50}"
+    )
+
+    blocks = [header]
     for idx, a in enumerate(attendees, 1):
         blocks.append(f"\n#{idx}  (ID: {a['id']})\n{_format_attendee(a)}")
         blocks.append("-" * 50)
@@ -81,48 +91,5 @@ async def list_all_attendees() -> str:
     return "\n".join(blocks)
 
 
-@mcp.tool()
-async def get_attendee_details(query: str, limit: int = 5) -> str:
-    """
-    Search for a specific attendee and return their full profile.
-
-    Uses semantic search so natural-language queries work well.
-
-    Args:
-        query : Name, role, organisation, skill, or any keyword —
-                e.g. "Vijender", "dentist", "cloud services", "IIT Bombay"
-        limit : Max number of results to return (default 5, max 50)
-    """
-    limit = max(1, min(limit, 50))
-
-    async with httpx.AsyncClient(timeout=15) as client:
-        resp = await client.get(
-            f"{BASE_URL}/search",
-            params={"q": query, "limit": limit},
-        )
-        resp.raise_for_status()
-
-    data = resp.json()
-    attendees = data.get("results", [])
-
-    if not attendees:
-        return f"No attendees found matching: '{query}'"
-
-    blocks = [
-        f"Found {len(attendees)} result(s) for '{query}'\n"
-        f"(expanded query: {data.get('expanded_query', query)})\n"
-        f"{'=' * 50}"
-    ]
-    for idx, a in enumerate(attendees, 1):
-        blocks.append(f"\n#{idx}  (ID: {a['id']})\n{_format_attendee(a, show_score=True)}")
-        blocks.append("-" * 50)
-
-    return "\n".join(blocks)
-
-
-# ── entry-point ───────────────────────────────────────────────────────────────
-
 if __name__ == "__main__":
-    # Streamable HTTP transport – required for claude.ai custom connectors.
-    # Connect claude.ai to: http://<this-machine-ip>:8000/mcp
     mcp.run(transport="streamable-http")
