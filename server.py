@@ -29,6 +29,10 @@ mcp = FastMCP(
 mcp.settings.host = "0.0.0.0"
 mcp.settings.port = int(os.environ.get("PORT", 8000))
 
+# Disable DNS rebinding protection so the server is reachable from external
+# hosts (Render domain, claude.ai, etc.) not just localhost
+mcp.settings.transport_security.enable_dns_rebinding_protection = False
+
 
 def _format_attendee(a: dict) -> str:
     lines = [
